@@ -14,6 +14,7 @@
   <div id="app" class="app" aria-live="polite">
     <!-- Screen: players -->
     <section class="screen active" id="screen-players">
+      <button class="fs-btn" id="btn-fs" title="Fullscreen">⛶</button>
       <div class="card">
         <h1>Reakční doba</h1>
         <p class="muted">Vyberte počet hráčů.</p>
@@ -23,12 +24,12 @@
           <button class="big" data-players="3">3 hráči</button>
           <button class="big" data-players="4">4 hráči</button>
         </div>
-        <div class="footer muted">Tip: na mobilu hrajte na šířku i na výšku – rohy jsou velká tlačítka.</div>
       </div>
     </section>
 
     <!-- Screen: topic -->
     <section class="screen" id="screen-topic">
+      <button class="fs-btn" id="btn-fs2" title="Fullscreen">⛶</button>
       <div class="card">
         <h2>Téma</h2>
         <p class="muted">První verze: pouze <b>tvary</b> (kruh, čtverec, obdélník, trojúhelník).</p>
@@ -47,6 +48,7 @@
 
     <!-- Screen: scoring -->
     <section class="screen" id="screen-scoring">
+      <button class="fs-btn" id="btn-fs3" title="Fullscreen">⛶</button>
       <div class="card">
         <h2>Bodování</h2>
         <p class="muted">Vyberte způsob přidělování bodů (platí jen pro správné reakce).</p>
@@ -78,65 +80,52 @@
     <!-- Screen: game -->
     <section class="screen" id="screen-game">
       <div class="game">
-        <div class="hud">
-          <div class="hud-left">
-            <div class="pill">Kolo: <span id="round-num">1</span></div>
-            <div class="pill">Bodování: <span id="mode-name">Klasické</span></div>
-          </div>
-          <div class="hud-right">
-            <button class="pill-btn" id="btn-reset" title="Zpět na začátek">Reset</button>
-          </div>
-        </div>
-
         <!-- Corner buttons -->
         <button class="corner c-blue" id="p1" aria-label="Hráč 1">
           <div class="corner-name">Modrý</div>
-          <div class="corner-score" id="score1">0</div>
+          <div class="corner-metric" id="avg1">—</div>
         </button>
 
         <button class="corner c-green" id="p2" aria-label="Hráč 2">
           <div class="corner-name">Zelený</div>
-          <div class="corner-score" id="score2">0</div>
+          <div class="corner-metric" id="avg2">—</div>
         </button>
 
         <button class="corner c-red" id="p3" aria-label="Hráč 3">
           <div class="corner-name">Červený</div>
-          <div class="corner-score" id="score3">0</div>
+          <div class="corner-metric" id="avg3">—</div>
         </button>
 
         <button class="corner c-yellow" id="p4" aria-label="Hráč 4">
           <div class="corner-name">Žlutý</div>
-          <div class="corner-score" id="score4">0</div>
+          <div class="corner-metric" id="avg4">—</div>
         </button>
 
         <!-- Center -->
         <div class="center">
-          <div class="target-frame" id="target-frame" aria-label="Cílový tvar">
-            <div id="target-shape" class="shape hidden" aria-hidden="true"></div>
-          </div>
-
-          <div class="stage" id="stage">
-            <div id="stage-shape" class="shape hidden" aria-hidden="true"></div>
+          <div class="frame" id="frame" aria-label="Tvar">
+            <div id="frame-shape" class="shape hidden" aria-hidden="true"></div>
           </div>
 
           <button class="start" id="btn-start">Start</button>
           <div class="countdown hidden" id="countdown">3</div>
 
-          <div class="results hidden" id="results">
-            <h3>Výsledky kola</h3>
+          <!-- Results modal -->
+          <div class="results hidden" id="results" role="dialog" aria-modal="true">
+            <div class="results-top">
+              <div class="results-title" id="results-title">Výsledky kola</div>
+              <div class="results-sub" id="results-sub">Kolo 1/10 • Bodování: Klasické</div>
+              <button class="pill-btn" id="btn-reset" title="Zpět na začátek">Reset</button>
+            </div>
+
             <div class="results-list" id="results-list"></div>
+
             <div class="row space">
-              <button class="ghost" id="btn-again">Znovu stejné kolo</button>
               <button class="big primary" id="btn-next">Next →</button>
             </div>
           </div>
 
-          <div class="hint muted" id="hint">
-            Klikněte na <b>Start</b>. Nejprve se 2 s ukáže „důležitý“ tvar v zeleném rámečku, pak běží tvary a reagujete jen na ten správný.
-          </div>
         </div>
-
-        <div class="overlay hidden" id="overlay-block" aria-hidden="true"></div>
       </div>
     </section>
   </div>
