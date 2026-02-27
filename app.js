@@ -1,9 +1,19 @@
+/* Reakční doba – v2 (tvary)
+   - 1–4 hráči (nepoužité rohy se vůbec nezobrazí)
+   - 10 kol
+   - bodování: classic / 3210 / time
+   - v rozích se zobrazuje průměrný reakční čas (z dosavadních kol), ne body
+   - po 10. kole se zobrazí celkové pořadí (body + průměr)
+*/
 (() => {
   'use strict';
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => [...document.querySelectorAll(sel)];
 
+  const TOTAL_ROUNDS = 10;
+
+  // Screens
   const screens = {
     players: $('#screen-players'),
     topic: $('#screen-topic'),
@@ -16,55 +26,49 @@
     screens[key].classList.add('active');
   }
 
+  // Fullscreen buttons
+  function toggleFullscreen(){
+    const el = document.documentElement;
+    if (!document.fullscreenElement){
+      (el.requestFullscreen?.() || el.webkitRequestFullscreen?.() || Promise.resolve()).catch?.(()=>{});
+    } else {
+      (document.exitFullscreen?.() || document.webkitExitFullscreen?.() || Promise.resolve()).catch?.(()=>{});
+    }
+  }
+  ['#btn-fs','#btn-fs2','#btn-fs3'].forEach(id => {
+    const b = $(id);
+    if (b) b.addEventListener('click', toggleFullscreen);
+  });
+
   // UI refs
   const btnStart = $('#btn-start');
   const countdownEl = $('#countdown');
-  const targetShapeEl = $('#target-shape');
-  const stageShapeEl = $('#stage-shape');
+
+  const frameEl = $('#frame');
+  const frameShapeEl = $('#frame-shape');
+
   const resultsEl = $('#results');
   const resultsList = $('#results-list');
+  const resultsTitle = $('#results-title');
+  const resultsSub = $('#results-sub');
   const btnNext = $('#btn-next');
-  const btnAgain = $('#btn-again');
-  const hintEl = $('#hint');
-  const overlayBlock = $('#overlay-block');
-
-  const roundNumEl = $('#round-num');
-  const modeNameEl = $('#mode-name');
+  const btnReset = $('#btn-reset');
 
   const cornerBtns = [$('#p1'), $('#p2'), $('#p3'), $('#p4')];
-  const scoreEls   = [$('#score1'), $('#score2'), $('#score3'), $('#score4')];
+  const avgEls = [$('#avg1'), $('#avg2'), $('#avg3'), $('#avg4')];
 
   const playerMeta = [
-    { id: 1, name: 'Modrý',   color: '#60a5fa' },
+    { id: 1, name: 'Modrý', color: '#60a5fa' },
     { id: 2, name: 'Zelený', color: '#22c55e' },
-    { id: 3, name: 'Červený',color: '#f43f5e' },
-    { id: 4, name: 'Žlutý',  color: '#f59e0b' },
+    { id: 3, name: 'Červený', color: '#f43f5e' },
+    { id: 4, name: 'Žlutý', color: '#f59e0b' },
   ];
 
-  const state = {
-    players: 4,
-    scoring: 'classic',
-    round: 1,
-    scores: [0,0,0,0],
-
-    // per-round
-    targetShape: null,
-    running: false,
-    accepting: false,
-    targetOn: false,
-    targetStartTs: 0,
-    tapped: [false,false,false,false],
-    disq:   [false,false,false,false],
-    rt:     [null,null,null,null],
-    shapeTimer: null,
-    stageTimer: null,
-    lastStageShape: null,
-  };
-
+  // Shapes
   const SHAPES = [
-    { key: 'circle',   label: 'Kruh' },
-    { key: 'square',   label: 'Čtverec' },
-    { key: 'rect',     label: 'Obdélník' },
+    { key: 'circle', label: 'Kruh' },
+    { key: 'square', label: 'Čtverec' },
+    { key: 'rect', label: 'Obdélník' },
     { key: 'triangle', label: 'Trojúhelník' },
   ];
 
@@ -78,7 +82,6 @@
   function setShape(el, shapeKey){
     el.classList.remove('hidden');
     el.innerHTML = '';
-
     const svgNS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('viewBox', '0 0 120 120');
@@ -86,9 +89,53 @@
     svg.setAttribute('height', '100%');
 
     const stroke = 'rgba(255,255,255,.92)';
-    const fill   = 'rgba(255,255,255,.12)';
-    const sw     = 8;
+    const fill = 'rgba(255,255,255,.12)';
+    const strokeWidth = 8;
 
+    const add = (node) => svg.appendChild(node);
+
+    if (shapeKey === 'circle'){
+      const c = document.createElementNS(svgNS, 'circle');
+      c.setAttribute('cx', '60');
+      c.setAttribute('cy', '60');
+      c.setAttribute('r', '42');
+      c.setAttribute('fill', fill);
+      c.setAttribute('stroke', stroke);
+      c.setAttribute('stroke-width', String(strokeWidth));
+      add(c);
+    } else if (shapeKey === 'square'){
+      const r = document.createElementNS(svgNS, 'rect');
+      r.setAttribute('x', '22');
+      r.setAttribute('y', '22');
+      r.setAttribute('width', '76');
+      r.setAttribute('height', '76');
+      r.setAttribute('rx', '10');
+      r.setAttribute('fill', fill);
+      r.setAttribute('stroke', stroke);
+      r.setAttribute('stroke-width', String(strokeWidth));
+      add(r);
+    } else if (shapeKey === 'rect'){
+      const r = document.createElementNS(svgNS, 'rect');
+      r.setAttribute('x', '14');
+      r.setAttribute('y', '34');
+      r.setAttribute('width', '92');
+      r.setAttribute('height', '52');
+      r.setAttribute('rx', '10');
+      r.setAttribute('fill', fill);
+      r.setAttribute('stroke', stroke);
+      r.setAttribute('stroke-width', String(strokeWidth));
+      add(r);
+    } else if (shapeKey === 'triangle'){
+      const p = document.createElementNS(svgNS, 'path');
+      p.setAttribute('d', 'M60 18 L104 96 L16 96 Z');
+      p.setAttribute('fill', fill);
+      p.setAttribute('stroke', stroke);
+      p.setAttribute('stroke-width', String(strokeWidth));
+      p.setAttribute('stroke-linejoin', 'round');
+      add(p);
+    }
+
+    // soft highlight
     const defs = document.createElementNS(svgNS, 'defs');
     const grad = document.createElementNS(svgNS, 'linearGradient');
     grad.setAttribute('id','grad');
@@ -100,50 +147,13 @@
     s2.setAttribute('offset','100%'); s2.setAttribute('stop-color','rgba(255,255,255,0)');
     grad.appendChild(s1); grad.appendChild(s2);
     defs.appendChild(grad);
-    svg.appendChild(defs);
+    svg.insertBefore(defs, svg.firstChild);
 
-    const add = (node) => svg.appendChild(node);
-
-    if (shapeKey === 'circle'){
-      const c = document.createElementNS(svgNS, 'circle');
-      c.setAttribute('cx','60'); c.setAttribute('cy','60'); c.setAttribute('r','42');
-      c.setAttribute('fill', fill);
-      c.setAttribute('stroke', stroke);
-      c.setAttribute('stroke-width', String(sw));
-      add(c);
-    } else if (shapeKey === 'square'){
-      const r = document.createElementNS(svgNS, 'rect');
-      r.setAttribute('x','22'); r.setAttribute('y','22');
-      r.setAttribute('width','76'); r.setAttribute('height','76');
-      r.setAttribute('rx','10');
-      r.setAttribute('fill', fill);
-      r.setAttribute('stroke', stroke);
-      r.setAttribute('stroke-width', String(sw));
-      add(r);
-    } else if (shapeKey === 'rect'){
-      const r = document.createElementNS(svgNS, 'rect');
-      r.setAttribute('x','14'); r.setAttribute('y','34');
-      r.setAttribute('width','92'); r.setAttribute('height','52');
-      r.setAttribute('rx','10');
-      r.setAttribute('fill', fill);
-      r.setAttribute('stroke', stroke);
-      r.setAttribute('stroke-width', String(sw));
-      add(r);
-    } else if (shapeKey === 'triangle'){
-      const p = document.createElementNS(svgNS, 'path');
-      p.setAttribute('d','M60 18 L104 96 L16 96 Z');
-      p.setAttribute('fill', fill);
-      p.setAttribute('stroke', stroke);
-      p.setAttribute('stroke-width', String(sw));
-      p.setAttribute('stroke-linejoin','round');
-      add(p);
-    }
-
-    const overlay = document.createElementNS(svgNS, 'rect');
-    overlay.setAttribute('x','0'); overlay.setAttribute('y','0');
-    overlay.setAttribute('width','120'); overlay.setAttribute('height','120');
-    overlay.setAttribute('fill','url(#grad)');
-    add(overlay);
+    const g = document.createElementNS(svgNS, 'rect');
+    g.setAttribute('x','0'); g.setAttribute('y','0');
+    g.setAttribute('width','120'); g.setAttribute('height','120');
+    g.setAttribute('fill','url(#grad)');
+    add(g);
 
     el.appendChild(svg);
   }
@@ -153,63 +163,118 @@
     el.innerHTML = '';
   }
 
+  function msText(ms){
+    if (typeof ms !== 'number' || !isFinite(ms)) return '—';
+    return `${Math.round(ms)} ms`;
+  }
+
+  // Game state
+  const state = {
+    players: 4,
+    scoring: 'classic',
+    round: 1, // 1..10
+    points: [0,0,0,0],
+
+    // average tracking (valid only)
+    rtSum: [0,0,0,0],
+    rtCount: [0,0,0,0],
+
+    // per-round
+    targetShape: null,
+    running: false,
+    accepting: false,
+    targetOn: false,
+    targetStartTs: 0,
+    tapped: [false,false,false,false],
+    disq: [false,false,false,false],
+    rt: [null,null,null,null],
+    stageTimer: null,
+    lastStageShape: null,
+  };
+
   function setPlayers(n){
     state.players = n;
     cornerBtns.forEach((btn, idx) => {
-      btn.classList.toggle('inactive', idx >= n);
+      btn.classList.toggle('hidden', idx >= n);
     });
   }
 
   function setScoring(mode){
     state.scoring = mode;
-    modeNameEl.textContent =
-      mode === 'classic' ? 'Klasické' :
-      mode === '3210' ? '3–2–1–0' : 'Podle času';
   }
 
-  function updateScoresUI(){
-    for (let i=0;i<4;i++) scoreEls[i].textContent = String(state.scores[i] ?? 0);
+  function scoringName(){
+    return state.scoring === 'classic' ? 'Klasické'
+         : state.scoring === '3210' ? '3–2–1–0'
+         : 'Podle času';
   }
 
-  function lockGameplay(lock){
-    overlayBlock.classList.toggle('hidden', !lock);
+  function updateCornerAvgs(){
+    for (let i=0;i<4;i++){
+      if (i >= state.players) continue;
+      if (state.rtCount[i] <= 0){
+        avgEls[i].textContent = '—';
+      } else {
+        avgEls[i].textContent = msText(state.rtSum[i] / state.rtCount[i]);
+      }
+    }
   }
 
-  function cleanupRound(){
+  function clearRoundState(){
     state.running = false;
     state.accepting = false;
     state.targetOn = false;
     state.targetStartTs = 0;
     state.tapped = [false,false,false,false];
-    state.disq   = [false,false,false,false];
-    state.rt     = [null,null,null,null];
+    state.disq = [false,false,false,false];
+    state.rt = [null,null,null,null];
+    state.lastStageShape = null;
 
-    if (state.shapeTimer) clearTimeout(state.shapeTimer);
     if (state.stageTimer) clearTimeout(state.stageTimer);
-    state.shapeTimer = null;
     state.stageTimer = null;
 
-    clearShape(targetShapeEl);
-    clearShape(stageShapeEl);
+    frameEl.classList.remove('target');
+    clearShape(frameShapeEl);
 
     resultsEl.classList.add('hidden');
     btnStart.disabled = false;
     btnStart.classList.remove('hidden');
     countdownEl.classList.add('hidden');
-    hintEl.classList.remove('hidden');
-    lockGameplay(false);
+
+    // re-enable corner taps
+    cornerBtns.forEach((b, idx) => {
+      if (idx < state.players) b.style.pointerEvents = 'auto';
+    });
+  }
+
+  function resetAll(){
+    state.round = 1;
+    state.points = [0,0,0,0];
+    state.rtSum = [0,0,0,0];
+    state.rtCount = [0,0,0,0];
+    updateCornerAvgs();
+    clearRoundState();
+    showScreen('players');
+  }
+
+  function lockCorners(lock){
+    cornerBtns.forEach((b, idx) => {
+      if (idx >= state.players) return;
+      b.style.pointerEvents = lock ? 'none' : 'auto';
+    });
   }
 
   function startRound(){
     if (state.running) return;
-    cleanupRound();
+    clearRoundState();
     state.running = true;
 
     btnStart.disabled = true;
-    hintEl.classList.add('hidden');
 
+    // choose target
     state.targetShape = pick(SHAPES).key;
 
+    // countdown 3..2..1 (3 seconds total)
     countdownEl.textContent = '3';
     countdownEl.classList.remove('hidden');
 
@@ -225,16 +290,19 @@
       c--;
       setTimeout(tick, 1000);
     };
-
+    // after 1s show 2, after another 1s show 1, after another show 0 then go
     setTimeout(() => { c = 2; tick(); }, 1000);
   }
 
   function showTargetThenGo(){
-    setShape(targetShapeEl, state.targetShape);
+    frameEl.classList.add('target');
+    setShape(frameShapeEl, state.targetShape);
     state.targetOn = true;
 
-    state.shapeTimer = setTimeout(() => {
-      clearShape(targetShapeEl);
+    // show for 2 seconds
+    state.stageTimer = setTimeout(() => {
+      frameEl.classList.remove('target');
+      clearShape(frameShapeEl);
       state.targetOn = false;
       runStageLoop();
     }, 2000);
@@ -246,17 +314,20 @@
     const loop = () => {
       if (!state.running) return;
 
+      // pick a stage shape (avoid immediate repeat)
       let shape = pick(SHAPES).key;
       if (shape === state.lastStageShape) shape = pick(SHAPES).key;
       state.lastStageShape = shape;
 
-      setShape(stageShapeEl, shape);
+      setShape(frameShapeEl, shape);
 
       const dur = randInt(1000, 2000);
 
       if (shape === state.targetShape){
         state.targetOn = true;
         state.targetStartTs = performance.now();
+
+        // end round after window
         state.stageTimer = setTimeout(() => {
           state.targetOn = false;
           endRound();
@@ -277,8 +348,10 @@
     if (state.stageTimer) clearTimeout(state.stageTimer);
     state.stageTimer = null;
 
-    lockGameplay(true);
-    setTimeout(showResultsAndScore, 250);
+    lockCorners(true);
+
+    // show results shortly after last shape
+    setTimeout(() => showResultsAndScore(false), 120);
   }
 
   function recordTap(playerIdx){
@@ -289,21 +362,15 @@
     state.tapped[playerIdx] = true;
 
     if (!state.targetOn || !state.targetStartTs){
-      // špatný tvar
+      // false start
       state.disq[playerIdx] = true;
       state.rt[playerIdx] = null;
       return;
     }
 
-    const rt = Math.max(0, performance.now() - state.targetStartTs);
+    const now = performance.now();
+    const rt = Math.max(0, now - state.targetStartTs);
     state.rt[playerIdx] = rt;
-
-    // Pokud už všichni stihli (validně nebo falešně), můžeme skončit hned.
-    let allDone = true;
-    for (let i=0;i<state.players;i++){
-      if (!state.tapped[i] && !state.disq[i]){ allDone = false; break; }
-    }
-    if (allDone) endRound();
   }
 
   function computeRanking(){
@@ -311,14 +378,19 @@
     for (let i=0;i<state.players;i++){
       const meta = playerMeta[i];
       const isDisq = !!state.disq[i];
-      const hasRT = typeof state.rt[i] === 'number';
       const tapped = !!state.tapped[i];
+      const hasRT = typeof state.rt[i] === 'number';
 
       let status = '';
-      if (isDisq) status = 'Falešný start (špatný tvar)';
-      else if (!tapped) status = 'Bez reakce';
-      else if (hasRT) status = `${state.rt[i].toFixed(0)} ms`;
-      else status = '—';
+      if (isDisq){
+        status = 'Falešný start';
+      } else if (!tapped){
+        status = 'Bez reakce';
+      } else if (hasRT){
+        status = msText(state.rt[i]);
+      } else {
+        status = '—';
+      }
 
       entries.push({
         idx: i,
@@ -328,14 +400,13 @@
         tapped,
         rt: hasRT ? state.rt[i] : null,
         status,
-        points: 0,
+        pointsAdd: 0,
       });
     }
 
     const valids = entries.filter(e => !e.disq && e.rt !== null).sort((a,b)=>a.rt-b.rt);
     const noResp = entries.filter(e => !e.disq && e.rt === null).sort((a,b)=>a.idx-b.idx);
-    const disq   = entries.filter(e => e.disq).sort((a,b)=>a.idx-b.idx);
-
+    const disq = entries.filter(e => e.disq).sort((a,b)=>a.idx-b.idx);
     return [...valids, ...noResp, ...disq];
   }
 
@@ -343,87 +414,165 @@
     const valids = ranking.filter(e => !e.disq && e.rt !== null);
 
     if (state.scoring === 'classic'){
-      if (valids.length > 0) valids[0].points = 1;
+      if (valids.length > 0) valids[0].pointsAdd = 1;
     } else if (state.scoring === '3210'){
       const pts = [3,2,1,0];
-      for (let i=0;i<valids.length;i++) valids[i].points = pts[i] ?? 0;
+      for (let i=0;i<valids.length;i++){
+        valids[i].pointsAdd = pts[i] ?? 0;
+      }
     } else if (state.scoring === 'time'){
       if (valids.length > 0){
         const tFast = valids[0].rt;
         for (const e of valids){
           const raw = 10 * (tFast / e.rt);
-          e.points = Math.max(0, Math.round(raw));
+          e.pointsAdd = Math.max(0, Math.round(raw));
         }
       }
     }
 
-    for (const e of ranking) state.scores[e.idx] += (e.points || 0);
+    for (const e of ranking){
+      state.points[e.idx] += (e.pointsAdd || 0);
+    }
   }
 
-  function showResultsAndScore(){
-    clearShape(stageShapeEl);
+  function updateAveragesFromRound(){
+    for (let i=0;i<state.players;i++){
+      if (!state.disq[i] && typeof state.rt[i] === 'number'){
+        state.rtSum[i] += state.rt[i];
+        state.rtCount[i] += 1;
+      }
+    }
+    updateCornerAvgs();
+  }
 
+  function showResultsAndScore(isFinal){
+    // scoring + averages
     const ranking = computeRanking();
     awardPoints(ranking);
-    updateScoresUI();
+    updateAveragesFromRound();
+
+    // render header
+    resultsTitle.textContent = isFinal ? 'Konec hry – celkové pořadí' : 'Výsledky kola';
+    resultsSub.textContent = isFinal
+      ? `Bodování: ${scoringName()}`
+      : `Kolo ${state.round}/${TOTAL_ROUNDS} • Bodování: ${scoringName()}`;
 
     resultsList.innerHTML = '';
-    ranking.forEach((e, i) => {
-      const row = document.createElement('div');
-      row.className = 'result-row';
 
-      const badge = document.createElement('div');
-      badge.className = 'badge';
-      badge.style.background = e.color;
-      badge.textContent = String(i+1);
+    if (!isFinal){
+      // per-round list
+      ranking.forEach((e, i) => {
+        const row = document.createElement('div');
+        row.className = 'result-row';
 
-      const mid = document.createElement('div');
-      const title = document.createElement('div');
-      title.style.fontWeight = '900';
-      title.textContent = e.name;
-      const sub = document.createElement('div');
-      sub.className = 'small';
-      sub.textContent = e.status;
-      mid.appendChild(title);
-      mid.appendChild(sub);
+        const badge = document.createElement('div');
+        badge.className = 'badge';
+        badge.style.background = e.color;
+        badge.textContent = String(i+1);
 
-      const pts = document.createElement('div');
-      pts.className = 'points';
-      pts.textContent = `+${e.points || 0}`;
+        const mid = document.createElement('div');
+        const title = document.createElement('div');
+        title.style.fontWeight = '1000';
+        title.textContent = e.name;
 
-      row.appendChild(badge);
-      row.appendChild(mid);
-      row.appendChild(pts);
+        const sub = document.createElement('div');
+        sub.className = 'small';
+        sub.textContent = e.status;
 
-      resultsList.appendChild(row);
-    });
+        mid.appendChild(title);
+        mid.appendChild(sub);
+
+        const pts = document.createElement('div');
+        pts.className = 'points';
+        pts.textContent = `+${e.pointsAdd || 0}`;
+
+        row.appendChild(badge);
+        row.appendChild(mid);
+        row.appendChild(pts);
+
+        resultsList.appendChild(row);
+      });
+
+      btnNext.textContent = (state.round >= TOTAL_ROUNDS) ? 'Zobrazit celkové pořadí →' : 'Next →';
+    } else {
+      // final ranking by points desc, avg asc
+      const finalEntries = [];
+      for (let i=0;i<state.players;i++){
+        const avg = state.rtCount[i] > 0 ? (state.rtSum[i]/state.rtCount[i]) : Infinity;
+        finalEntries.push({
+          idx: i,
+          name: playerMeta[i].name,
+          color: playerMeta[i].color,
+          points: state.points[i],
+          avg,
+          avgText: state.rtCount[i] > 0 ? msText(avg) : '—',
+        });
+      }
+      finalEntries.sort((a,b) => (b.points - a.points) || (a.avg - b.avg) || (a.idx - b.idx));
+
+      finalEntries.forEach((e, i) => {
+        const row = document.createElement('div');
+        row.className = 'result-row';
+
+        const badge = document.createElement('div');
+        badge.className = 'badge';
+        badge.style.background = e.color;
+        badge.textContent = String(i+1);
+
+        const mid = document.createElement('div');
+        const title = document.createElement('div');
+        title.style.fontWeight = '1000';
+        title.textContent = e.name;
+
+        const sub = document.createElement('div');
+        sub.className = 'small';
+        sub.textContent = `Průměr: ${e.avgText}`;
+
+        mid.appendChild(title);
+        mid.appendChild(sub);
+
+        const pts = document.createElement('div');
+        pts.className = 'points';
+        pts.textContent = `${e.points} b`;
+
+        row.appendChild(badge);
+        row.appendChild(mid);
+        row.appendChild(pts);
+
+        resultsList.appendChild(row);
+      });
+
+      btnNext.textContent = 'Nová hra';
+    }
 
     resultsEl.classList.remove('hidden');
     btnStart.classList.add('hidden');
+
+    // unlock Next click (corners stay locked while results visible)
+    lockCorners(true);
   }
 
-  function nextRound(){
+  function nextAction(){
+    if (state.round >= TOTAL_ROUNDS){
+      // show final ranking modal
+      showResultsAndScore(true);
+      return;
+    }
+    // advance to next round
     state.round += 1;
-    roundNumEl.textContent = String(state.round);
-    cleanupRound();
+    clearRoundState();
   }
 
-  function againRound(){
-    cleanupRound();
-  }
-
-  function resetAll(){
-    state.round = 1;
-    state.scores = [0,0,0,0];
-    updateScoresUI();
-    cleanupRound();
-    showScreen('players');
+  function nextFromFinal(){
+    // reset and go to menu
+    resetAll();
   }
 
   // Navigation wiring
   $$('#screen-players button[data-players]').forEach(btn => {
     btn.addEventListener('click', () => {
-      setPlayers(Number(btn.dataset.players));
+      const n = Number(btn.dataset.players);
+      setPlayers(n);
       showScreen('topic');
     });
   });
@@ -435,18 +584,36 @@
   $('#go-to-game').addEventListener('click', () => {
     const checked = $('input[name="scoring"]:checked');
     setScoring(checked ? checked.value : 'classic');
-    roundNumEl.textContent = String(state.round);
-    updateScoresUI();
+
+    // reset stats for a new game session
+    state.round = 1;
+    state.points = [0,0,0,0];
+    state.rtSum = [0,0,0,0];
+    state.rtCount = [0,0,0,0];
+    updateCornerAvgs();
+
+    clearRoundState();
     showScreen('game');
   });
 
-  $$('input[name="scoring"]').forEach(r => r.addEventListener('change', () => setScoring(r.value)));
+  // Scoring radios (just for immediate internal update)
+  $$('input[name="scoring"]').forEach(r => {
+    r.addEventListener('change', () => setScoring(r.value));
+  });
 
   // Game controls
   btnStart.addEventListener('click', startRound);
-  btnNext.addEventListener('click', nextRound);
-  btnAgain.addEventListener('click', againRound);
-  $('#btn-reset').addEventListener('click', resetAll);
+
+  btnNext.addEventListener('click', () => {
+    // If we are currently showing the final table, Next means "new game"
+    if (resultsTitle.textContent.includes('Konec hry')){
+      nextFromFinal();
+    } else {
+      nextAction();
+    }
+  });
+
+  btnReset.addEventListener('click', resetAll);
 
   // Corner taps
   cornerBtns.forEach((btn, idx) => {
@@ -454,28 +621,29 @@
       ev.preventDefault();
       recordTap(idx);
     };
-    btn.addEventListener('pointerdown', onTap, { passive:false });
-    btn.addEventListener('click', onTap, { passive:false });
+    btn.addEventListener('pointerdown', onTap, { passive: false });
+    btn.addEventListener('click', onTap, { passive: false });
   });
 
   // Prevent double-tap zoom (mobile)
   let lastTouch = 0;
   document.addEventListener('touchend', (e) => {
     const now = Date.now();
-    if (now - lastTouch <= 300) e.preventDefault();
+    if (now - lastTouch <= 300){
+      e.preventDefault();
+    }
     lastTouch = now;
-  }, { passive:false });
+  }, { passive: false });
 
-  // Service worker
+  // Register service worker
   if ('serviceWorker' in navigator){
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
     });
   }
 
-  // Init
+  // Initialize
   setPlayers(4);
-  setScoring('classic');
-  updateScoresUI();
+  updateCornerAvgs();
   showScreen('players');
 })();
