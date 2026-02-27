@@ -1,649 +1,634 @@
-/* Reakční doba – v2 (tvary)
-   - 1–4 hráči (nepoužité rohy se vůbec nezobrazí)
-   - 10 kol
-   - bodování: classic / 3210 / time
-   - v rozích se zobrazuje průměrný reakční čas (z dosavadních kol), ne body
-   - po 10. kole se zobrazí celkové pořadí (body + průměr)
+/* app.js – Šumy (PWA)
+   - Syntetické šumy přes AudioWorklet (noise-worklet.js)
+   - Real MP3 přes WebAudio buffer + seamless loop (loopStart/loopEnd)
+   - Nezastavuje při zhasnutí/změně viditelnosti (běh na pozadí)
 */
-(() => {
-  'use strict';
 
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => [...document.querySelectorAll(sel)];
+const $ = (id) => document.getElementById(id);
 
-  const TOTAL_ROUNDS = 10;
+const soundBtn   = $("soundBtn");
+const toggleBtn  = $("toggleBtn");
+const intensity  = $("intensity");
+const volume     = $("volume");
+const statusEl   = $("status");
 
-  // Screens
-  const screens = {
-    players: $('#screen-players'),
-    topic: $('#screen-topic'),
-    scoring: $('#screen-scoring'),
-    game: $('#screen-game'),
-  };
+// Timer
+const timerDisplay = $("timerDisplay");
+const timerToggle  = $("timerToggle");
+const timerModal   = $("timerModal");
+const timerCancel  = $("timerCancel");
+const timerOk      = $("timerOk");
+const timerTopH    = $("timerTopH");
+const timerTopM    = $("timerTopM");
+const timerTopS    = $("timerTopS");
+const wheelH       = $("wheelH");
+const wheelM       = $("wheelM");
+const wheelS       = $("wheelS");
 
-  function showScreen(key){
-    Object.values(screens).forEach(s => s.classList.remove('active'));
-    screens[key].classList.add('active');
+const soundModal = $("soundModal");
+const soundClose = $("soundClose");
+
+let timerEnabled = false;
+let timerSeconds = 0;
+let timerEndAt = 0;
+let timerTickInterval = null;
+
+// ====== Audio (WebAudio) ======
+let ctx = null;
+let masterGain = null;
+
+let noiseNode = null;      // AudioWorkletNode
+let fileSource = null;     // AudioBufferSourceNode (real MP3)
+
+let isPlaying = false;
+
+let currentSound = localStorage.getItem("sumySound") || "white";
+
+// Buffery pro real nahrávky
+let realWaterfallBuffer = null;
+let realSeaBuffer = null;
+let realWindBuffer = null;
+let realRainBuffer = null;
+
+let realWaterfallBufferPromise = null;
+let realSeaBufferPromise = null;
+let realWindBufferPromise = null;
+let realRainBufferPromise = null;
+
+function setStatus(t){
+  if (statusEl) statusEl.textContent = t || "";
+}
+
+function clamp01(x){
+  return Math.max(0, Math.min(1, x));
+}
+
+function volToGain(v){
+  const x = Math.max(0, Math.min(1, v / 100));
+  return Math.pow(x, 1.6);
+}
+
+function intensity01(){
+  return Math.max(0, Math.min(1, Number(intensity.value) / 100));
+}
+
+// === Seamless loop pro "real" MP3 (odstraní ticho na konci a začne až po úvodním náběhu) ===
+// Pozn.: WebAudio BufferSource umí loopStart/loopEnd. Trimujeme typicky posledních ~150 ms,
+// kde u MP3 často zůstane ticho / enkódovací "tail". Startujeme o ~50 ms později.
+function configureSeamlessRealLoop(source, buffer){
+  const head = 0.05;   // přeskoč úplný začátek (klik/lead-in)
+  const tail = 0.15;   // přeskoč ticho na konci (typicky 1–2 s u některých MP3)
+  const minLoop = 0.40;
+
+  const dur = Math.max(0, Number(buffer?.duration) || 0);
+  let loopStart = Math.min(head, Math.max(0, dur - 0.20));
+  let loopEnd   = Math.max(loopStart + minLoop, dur - tail);
+
+  loopStart = Math.max(0, Math.min(loopStart, dur));
+  loopEnd   = Math.max(0, Math.min(loopEnd, dur));
+
+  if (dur < 0.5 || loopEnd <= loopStart + 0.05){
+    loopStart = 0;
+    loopEnd = dur;
   }
 
-  // Fullscreen buttons
-  function toggleFullscreen(){
-    const el = document.documentElement;
-    if (!document.fullscreenElement){
-      (el.requestFullscreen?.() || el.webkitRequestFullscreen?.() || Promise.resolve()).catch?.(()=>{});
-    } else {
-      (document.exitFullscreen?.() || document.webkitExitFullscreen?.() || Promise.resolve()).catch?.(()=>{});
-    }
+  source.loop = true;
+  source.loopStart = loopStart;
+  source.loopEnd = loopEnd;
+
+  return loopStart;
+}
+
+function labelFor(id){
+  switch(id){
+    case "white": return "Bílý šum";
+    case "pink": return "Růžový šum";
+    case "brown": return "Hnědý šum";
+    case "fan": return "Ventilátor";
+    case "waterfall_real": return "Vodopád (real)";
+    case "sea_real": return "Moře (real)";
+    case "wind_real": return "Vítr (real)";
+    case "rain_real": return "Déšť (real)";
+    case "waterfall": return "Vodopád";
+    case "rain": return "Déšť";
+    case "wind": return "Vítr";
+    case "vacuum": return "Vysavač";
+    default: return "Šum";
   }
-  ['#btn-fs','#btn-fs2','#btn-fs3'].forEach(id => {
-    const b = $(id);
-    if (b) b.addEventListener('click', toggleFullscreen);
-  });
+}
 
-  // UI refs
-  const btnStart = $('#btn-start');
-  const countdownEl = $('#countdown');
-
-  const frameEl = $('#frame');
-  const frameShapeEl = $('#frame-shape');
-
-  const resultsEl = $('#results');
-  const resultsList = $('#results-list');
-  const resultsTitle = $('#results-title');
-  const resultsSub = $('#results-sub');
-  const btnNext = $('#btn-next');
-  const btnReset = $('#btn-reset');
-
-  const cornerBtns = [$('#p1'), $('#p2'), $('#p3'), $('#p4')];
-  const avgEls = [$('#avg1'), $('#avg2'), $('#avg3'), $('#avg4')];
-
-  const playerMeta = [
-    { id: 1, name: 'Modrý', color: '#60a5fa' },
-    { id: 2, name: 'Zelený', color: '#22c55e' },
-    { id: 3, name: 'Červený', color: '#f43f5e' },
-    { id: 4, name: 'Žlutý', color: '#f59e0b' },
-  ];
-
-  // Shapes
-  const SHAPES = [
-    { key: 'circle', label: 'Kruh' },
-    { key: 'square', label: 'Čtverec' },
-    { key: 'rect', label: 'Obdélník' },
-    { key: 'triangle', label: 'Trojúhelník' },
-  ];
-
-  function randInt(min, max){
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+function updateSoundBtnLabel(){
+  if (!soundBtn) return;
+  // soundBtn má v HTML: text + <span class="chev">▾</span>
+  const first = soundBtn.childNodes[0];
+  if (first && first.nodeType === Node.TEXT_NODE){
+    first.textContent = labelFor(currentSound) + " ";
+  } else {
+    soundBtn.textContent = labelFor(currentSound);
   }
-  function pick(arr){
-    return arr[randInt(0, arr.length-1)];
+}
+
+function openSoundModal(){
+  soundModal.hidden = false;
+  soundModal.style.display = "flex";
+  document.body.classList.add("modalOpen");
+}
+
+function closeSoundModal(){
+  soundModal.hidden = true;
+  soundModal.style.display = "none";
+  document.body.classList.remove("modalOpen");
+}
+
+function updateToggleUI(){
+  if (!toggleBtn) return;
+  toggleBtn.textContent = isPlaying ? "Stop" : "▶ Play";
+  toggleBtn.setAttribute("aria-pressed", isPlaying ? "true" : "false");
+}
+
+function pad2(n){ return String(n).padStart(2,"0"); }
+
+function formatTimer(sec){
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = sec%60;
+  if (h>0) return `${h}:${pad2(m)}:${pad2(s)}`;
+  return `${m}:${pad2(s)}`;
+}
+
+function updateTimerDisplay(){
+  if (!timerDisplay) return;
+  if (!timerEnabled || timerSeconds<=0){
+    timerDisplay.textContent = "—";
+    return;
   }
+  const now = Date.now();
+  const left = Math.max(0, Math.ceil((timerEndAt - now)/1000));
+  timerDisplay.textContent = formatTimer(left);
+}
 
-  function setShape(el, shapeKey){
-    el.classList.remove('hidden');
-    el.innerHTML = '';
-    const svgNS = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(svgNS, 'svg');
-    svg.setAttribute('viewBox', '0 0 120 120');
-    svg.setAttribute('width', '100%');
-    svg.setAttribute('height', '100%');
-
-    const stroke = 'rgba(255,255,255,.92)';
-    const fill = 'rgba(255,255,255,.12)';
-    const strokeWidth = 8;
-
-    const add = (node) => svg.appendChild(node);
-
-    if (shapeKey === 'circle'){
-      const c = document.createElementNS(svgNS, 'circle');
-      c.setAttribute('cx', '60');
-      c.setAttribute('cy', '60');
-      c.setAttribute('r', '42');
-      c.setAttribute('fill', fill);
-      c.setAttribute('stroke', stroke);
-      c.setAttribute('stroke-width', String(strokeWidth));
-      add(c);
-    } else if (shapeKey === 'square'){
-      const r = document.createElementNS(svgNS, 'rect');
-      r.setAttribute('x', '22');
-      r.setAttribute('y', '22');
-      r.setAttribute('width', '76');
-      r.setAttribute('height', '76');
-      r.setAttribute('rx', '10');
-      r.setAttribute('fill', fill);
-      r.setAttribute('stroke', stroke);
-      r.setAttribute('stroke-width', String(strokeWidth));
-      add(r);
-    } else if (shapeKey === 'rect'){
-      const r = document.createElementNS(svgNS, 'rect');
-      r.setAttribute('x', '14');
-      r.setAttribute('y', '34');
-      r.setAttribute('width', '92');
-      r.setAttribute('height', '52');
-      r.setAttribute('rx', '10');
-      r.setAttribute('fill', fill);
-      r.setAttribute('stroke', stroke);
-      r.setAttribute('stroke-width', String(strokeWidth));
-      add(r);
-    } else if (shapeKey === 'triangle'){
-      const p = document.createElementNS(svgNS, 'path');
-      p.setAttribute('d', 'M60 18 L104 96 L16 96 Z');
-      p.setAttribute('fill', fill);
-      p.setAttribute('stroke', stroke);
-      p.setAttribute('stroke-width', String(strokeWidth));
-      p.setAttribute('stroke-linejoin', 'round');
-      add(p);
-    }
-
-    // soft highlight
-    const defs = document.createElementNS(svgNS, 'defs');
-    const grad = document.createElementNS(svgNS, 'linearGradient');
-    grad.setAttribute('id','grad');
-    grad.setAttribute('x1','0'); grad.setAttribute('y1','0');
-    grad.setAttribute('x2','1'); grad.setAttribute('y2','1');
-    const s1 = document.createElementNS(svgNS, 'stop');
-    s1.setAttribute('offset','0%'); s1.setAttribute('stop-color','rgba(255,255,255,.12)');
-    const s2 = document.createElementNS(svgNS, 'stop');
-    s2.setAttribute('offset','100%'); s2.setAttribute('stop-color','rgba(255,255,255,0)');
-    grad.appendChild(s1); grad.appendChild(s2);
-    defs.appendChild(grad);
-    svg.insertBefore(defs, svg.firstChild);
-
-    const g = document.createElementNS(svgNS, 'rect');
-    g.setAttribute('x','0'); g.setAttribute('y','0');
-    g.setAttribute('width','120'); g.setAttribute('height','120');
-    g.setAttribute('fill','url(#grad)');
-    add(g);
-
-    el.appendChild(svg);
+function stopTimerTick(){
+  if (timerTickInterval){
+    clearInterval(timerTickInterval);
+    timerTickInterval = null;
   }
-
-  function clearShape(el){
-    el.classList.add('hidden');
-    el.innerHTML = '';
-  }
-
-  function msText(ms){
-    if (typeof ms !== 'number' || !isFinite(ms)) return '—';
-    return `${Math.round(ms)} ms`;
-  }
-
-  // Game state
-  const state = {
-    players: 4,
-    scoring: 'classic',
-    round: 1, // 1..10
-    points: [0,0,0,0],
-
-    // average tracking (valid only)
-    rtSum: [0,0,0,0],
-    rtCount: [0,0,0,0],
-
-    // per-round
-    targetShape: null,
-    running: false,
-    accepting: false,
-    targetOn: false,
-    targetStartTs: 0,
-    tapped: [false,false,false,false],
-    disq: [false,false,false,false],
-    rt: [null,null,null,null],
-    stageTimer: null,
-    lastStageShape: null,
-  };
-
-  function setPlayers(n){
-    state.players = n;
-    cornerBtns.forEach((btn, idx) => {
-      btn.classList.toggle('hidden', idx >= n);
-    });
-  }
-
-  function setScoring(mode){
-    state.scoring = mode;
-  }
-
-  function scoringName(){
-    return state.scoring === 'classic' ? 'Klasické'
-         : state.scoring === '3210' ? '3–2–1–0'
-         : 'Podle času';
-  }
-
-  function updateCornerAvgs(){
-    for (let i=0;i<4;i++){
-      if (i >= state.players) continue;
-      if (state.rtCount[i] <= 0){
-        avgEls[i].textContent = '—';
-      } else {
-        avgEls[i].textContent = msText(state.rtSum[i] / state.rtCount[i]);
-      }
-    }
-  }
-
-  function clearRoundState(){
-    state.running = false;
-    state.accepting = false;
-    state.targetOn = false;
-    state.targetStartTs = 0;
-    state.tapped = [false,false,false,false];
-    state.disq = [false,false,false,false];
-    state.rt = [null,null,null,null];
-    state.lastStageShape = null;
-
-    if (state.stageTimer) clearTimeout(state.stageTimer);
-    state.stageTimer = null;
-
-    frameEl.classList.remove('target');
-    clearShape(frameShapeEl);
-
-    resultsEl.classList.add('hidden');
-    btnStart.disabled = false;
-    btnStart.classList.remove('hidden');
-    countdownEl.classList.add('hidden');
-
-    // re-enable corner taps
-    cornerBtns.forEach((b, idx) => {
-      if (idx < state.players) b.style.pointerEvents = 'auto';
-    });
-  }
-
-  function resetAll(){
-    state.round = 1;
-    state.points = [0,0,0,0];
-    state.rtSum = [0,0,0,0];
-    state.rtCount = [0,0,0,0];
-    updateCornerAvgs();
-    clearRoundState();
-    showScreen('players');
-  }
-
-  function lockCorners(lock){
-    cornerBtns.forEach((b, idx) => {
-      if (idx >= state.players) return;
-      b.style.pointerEvents = lock ? 'none' : 'auto';
-    });
-  }
-
-  function startRound(){
-    if (state.running) return;
-    clearRoundState();
-    state.running = true;
-
-    btnStart.disabled = true;
-
-    // choose target
-    state.targetShape = pick(SHAPES).key;
-
-    // countdown 3..2..1 (3 seconds total)
-    countdownEl.textContent = '3';
-    countdownEl.classList.remove('hidden');
-
-    let c = 3;
-    const tick = () => {
-      if (!state.running) return;
-      countdownEl.textContent = String(c);
-      if (c === 0){
-        countdownEl.classList.add('hidden');
-        showTargetThenGo();
-        return;
-      }
-      c--;
-      setTimeout(tick, 1000);
-    };
-    // after 1s show 2, after another 1s show 1, after another show 0 then go
-    setTimeout(() => { c = 2; tick(); }, 1000);
-  }
-
-  function showTargetThenGo(){
-    frameEl.classList.add('target');
-    setShape(frameShapeEl, state.targetShape);
-    state.targetOn = true;
-
-    // show for 2 seconds
-    state.stageTimer = setTimeout(() => {
-      frameEl.classList.remove('target');
-      clearShape(frameShapeEl);
-      state.targetOn = false;
-      runStageLoop();
-    }, 2000);
-  }
-
-  function runStageLoop(){
-    state.accepting = true;
-
-    const loop = () => {
-      if (!state.running) return;
-
-      // pick a stage shape (avoid immediate repeat)
-      let shape = pick(SHAPES).key;
-      if (shape === state.lastStageShape) shape = pick(SHAPES).key;
-      state.lastStageShape = shape;
-
-      setShape(frameShapeEl, shape);
-
-      const dur = randInt(1000, 2000);
-
-      if (shape === state.targetShape){
-        state.targetOn = true;
-        state.targetStartTs = performance.now();
-
-        // end round after window
-        state.stageTimer = setTimeout(() => {
-          state.targetOn = false;
-          endRound();
-        }, dur);
-      } else {
-        state.targetOn = false;
-        state.stageTimer = setTimeout(loop, dur);
-      }
-    };
-
-    loop();
-  }
-
-  function endRound(){
-    state.accepting = false;
-    state.running = false;
-
-    if (state.stageTimer) clearTimeout(state.stageTimer);
-    state.stageTimer = null;
-
-    lockCorners(true);
-
-    // show results shortly after last shape
-    setTimeout(() => showResultsAndScore(false), 120);
-  }
-
-  function recordTap(playerIdx){
-    if (playerIdx >= state.players) return;
-    if (!state.accepting) return;
-    if (state.tapped[playerIdx]) return;
-
-    state.tapped[playerIdx] = true;
-
-    if (!state.targetOn || !state.targetStartTs){
-      // false start
-      state.disq[playerIdx] = true;
-      state.rt[playerIdx] = null;
-      return;
-    }
-
-    const now = performance.now();
-    const rt = Math.max(0, now - state.targetStartTs);
-    state.rt[playerIdx] = rt;
-  }
-
-  function computeRanking(){
-    const entries = [];
-    for (let i=0;i<state.players;i++){
-      const meta = playerMeta[i];
-      const isDisq = !!state.disq[i];
-      const tapped = !!state.tapped[i];
-      const hasRT = typeof state.rt[i] === 'number';
-
-      let status = '';
-      if (isDisq){
-        status = 'Falešný start';
-      } else if (!tapped){
-        status = 'Bez reakce';
-      } else if (hasRT){
-        status = msText(state.rt[i]);
-      } else {
-        status = '—';
-      }
-
-      entries.push({
-        idx: i,
-        name: meta.name,
-        color: meta.color,
-        disq: isDisq,
-        tapped,
-        rt: hasRT ? state.rt[i] : null,
-        status,
-        pointsAdd: 0,
-      });
-    }
-
-    const valids = entries.filter(e => !e.disq && e.rt !== null).sort((a,b)=>a.rt-b.rt);
-    const noResp = entries.filter(e => !e.disq && e.rt === null).sort((a,b)=>a.idx-b.idx);
-    const disq = entries.filter(e => e.disq).sort((a,b)=>a.idx-b.idx);
-    return [...valids, ...noResp, ...disq];
-  }
-
-  function awardPoints(ranking){
-    const valids = ranking.filter(e => !e.disq && e.rt !== null);
-
-    if (state.scoring === 'classic'){
-      if (valids.length > 0) valids[0].pointsAdd = 1;
-    } else if (state.scoring === '3210'){
-      const pts = [3,2,1,0];
-      for (let i=0;i<valids.length;i++){
-        valids[i].pointsAdd = pts[i] ?? 0;
-      }
-    } else if (state.scoring === 'time'){
-      if (valids.length > 0){
-        const tFast = valids[0].rt;
-        for (const e of valids){
-          const raw = 10 * (tFast / e.rt);
-          e.pointsAdd = Math.max(0, Math.round(raw));
-        }
-      }
-    }
-
-    for (const e of ranking){
-      state.points[e.idx] += (e.pointsAdd || 0);
-    }
-  }
-
-  function updateAveragesFromRound(){
-    for (let i=0;i<state.players;i++){
-      if (!state.disq[i] && typeof state.rt[i] === 'number'){
-        state.rtSum[i] += state.rt[i];
-        state.rtCount[i] += 1;
-      }
-    }
-    updateCornerAvgs();
-  }
-
-  function showResultsAndScore(isFinal){
-    // scoring + averages
-    const ranking = computeRanking();
-    awardPoints(ranking);
-    updateAveragesFromRound();
-
-    // render header
-    resultsTitle.textContent = isFinal ? 'Konec hry – celkové pořadí' : 'Výsledky kola';
-    resultsSub.textContent = isFinal
-      ? `Bodování: ${scoringName()}`
-      : `Kolo ${state.round}/${TOTAL_ROUNDS} • Bodování: ${scoringName()}`;
-
-    resultsList.innerHTML = '';
-
-    if (!isFinal){
-      // per-round list
-      ranking.forEach((e, i) => {
-        const row = document.createElement('div');
-        row.className = 'result-row';
-
-        const badge = document.createElement('div');
-        badge.className = 'badge';
-        badge.style.background = e.color;
-        badge.textContent = String(i+1);
-
-        const mid = document.createElement('div');
-        const title = document.createElement('div');
-        title.style.fontWeight = '1000';
-        title.textContent = e.name;
-
-        const sub = document.createElement('div');
-        sub.className = 'small';
-        sub.textContent = e.status;
-
-        mid.appendChild(title);
-        mid.appendChild(sub);
-
-        const pts = document.createElement('div');
-        pts.className = 'points';
-        pts.textContent = `+${e.pointsAdd || 0}`;
-
-        row.appendChild(badge);
-        row.appendChild(mid);
-        row.appendChild(pts);
-
-        resultsList.appendChild(row);
-      });
-
-      btnNext.textContent = (state.round >= TOTAL_ROUNDS) ? 'Zobrazit celkové pořadí →' : 'Next →';
-    } else {
-      // final ranking by points desc, avg asc
-      const finalEntries = [];
-      for (let i=0;i<state.players;i++){
-        const avg = state.rtCount[i] > 0 ? (state.rtSum[i]/state.rtCount[i]) : Infinity;
-        finalEntries.push({
-          idx: i,
-          name: playerMeta[i].name,
-          color: playerMeta[i].color,
-          points: state.points[i],
-          avg,
-          avgText: state.rtCount[i] > 0 ? msText(avg) : '—',
-        });
-      }
-      finalEntries.sort((a,b) => (b.points - a.points) || (a.avg - b.avg) || (a.idx - b.idx));
-
-      finalEntries.forEach((e, i) => {
-        const row = document.createElement('div');
-        row.className = 'result-row';
-
-        const badge = document.createElement('div');
-        badge.className = 'badge';
-        badge.style.background = e.color;
-        badge.textContent = String(i+1);
-
-        const mid = document.createElement('div');
-        const title = document.createElement('div');
-        title.style.fontWeight = '1000';
-        title.textContent = e.name;
-
-        const sub = document.createElement('div');
-        sub.className = 'small';
-        sub.textContent = `Průměr: ${e.avgText}`;
-
-        mid.appendChild(title);
-        mid.appendChild(sub);
-
-        const pts = document.createElement('div');
-        pts.className = 'points';
-        pts.textContent = `${e.points} b`;
-
-        row.appendChild(badge);
-        row.appendChild(mid);
-        row.appendChild(pts);
-
-        resultsList.appendChild(row);
-      });
-
-      btnNext.textContent = 'Nová hra';
-    }
-
-    resultsEl.classList.remove('hidden');
-    btnStart.classList.add('hidden');
-
-    // unlock Next click (corners stay locked while results visible)
-    lockCorners(true);
-  }
-
-  function nextAction(){
-    if (state.round >= TOTAL_ROUNDS){
-      // show final ranking modal
-      showResultsAndScore(true);
-      return;
-    }
-    // advance to next round
-    state.round += 1;
-    clearRoundState();
-  }
-
-  function nextFromFinal(){
-    // reset and go to menu
-    resetAll();
-  }
-
-  // Navigation wiring
-  $$('#screen-players button[data-players]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const n = Number(btn.dataset.players);
-      setPlayers(n);
-      showScreen('topic');
-    });
-  });
-
-  $('#back-to-players').addEventListener('click', () => showScreen('players'));
-  $('#topic-shapes').addEventListener('click', () => showScreen('scoring'));
-  $('#back-to-topic').addEventListener('click', () => showScreen('topic'));
-
-  $('#go-to-game').addEventListener('click', () => {
-    const checked = $('input[name="scoring"]:checked');
-    setScoring(checked ? checked.value : 'classic');
-
-    // reset stats for a new game session
-    state.round = 1;
-    state.points = [0,0,0,0];
-    state.rtSum = [0,0,0,0];
-    state.rtCount = [0,0,0,0];
-    updateCornerAvgs();
-
-    clearRoundState();
-    showScreen('game');
-  });
-
-  // Scoring radios (just for immediate internal update)
-  $$('input[name="scoring"]').forEach(r => {
-    r.addEventListener('change', () => setScoring(r.value));
-  });
-
-  // Game controls
-  btnStart.addEventListener('click', startRound);
-
-  btnNext.addEventListener('click', () => {
-    // If we are currently showing the final table, Next means "new game"
-    if (resultsTitle.textContent.includes('Konec hry')){
-      nextFromFinal();
-    } else {
-      nextAction();
-    }
-  });
-
-  btnReset.addEventListener('click', resetAll);
-
-  // Corner taps
-  cornerBtns.forEach((btn, idx) => {
-    const onTap = (ev) => {
-      ev.preventDefault();
-      recordTap(idx);
-    };
-    btn.addEventListener('pointerdown', onTap, { passive: false });
-    btn.addEventListener('click', onTap, { passive: false });
-  });
-
-  // Prevent double-tap zoom (mobile)
-  let lastTouch = 0;
-  document.addEventListener('touchend', (e) => {
+}
+
+function startTimerTick(){
+  stopTimerTick();
+  timerTickInterval = setInterval(() => {
+    if (!timerEnabled) return;
     const now = Date.now();
-    if (now - lastTouch <= 300){
-      e.preventDefault();
+    const left = Math.max(0, Math.ceil((timerEndAt - now)/1000));
+    if (left<=0){
+      timerEnabled = false;
+      timerSeconds = 0;
+      timerEndAt = 0;
+      stopTimerTick();
+      updateTimerDisplay();
+      if (isPlaying) stopHard();
+      return;
     }
-    lastTouch = now;
-  }, { passive: false });
+    updateTimerDisplay();
+  }, 250);
+}
 
-  // Register service worker
-  if ('serviceWorker' in navigator){
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
-    });
+function openTimerModal(){
+  if (!timerModal) return;
+  timerModal.hidden = false;
+  timerModal.style.display = "flex";
+  document.body.classList.add("modalOpen");
+}
+
+function closeTimerModal(){
+  if (!timerModal) return;
+  timerModal.hidden = true;
+  timerModal.style.display = "none";
+  document.body.classList.remove("modalOpen");
+}
+
+function buildWheel(listEl, max){
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  for (let i = 0; i <= max; i++){
+    const div = document.createElement("div");
+    div.className = "wheelItem";
+    div.textContent = pad2(i);
+    div.dataset.value = String(i);
+    listEl.appendChild(div);
+  }
+}
+
+function getItemHeight(listEl){
+  const item = listEl?.querySelector(".wheelItem");
+  if (!item) return 56;
+  const r = item.getBoundingClientRect();
+  return Math.max(40, Math.round(r.height || 56));
+}
+
+function scrollToValue(listEl, value, behavior="auto"){
+  if (!listEl) return;
+  const itemH = getItemHeight(listEl);
+  listEl.scrollTo({ top: value*itemH, behavior });
+}
+
+function getNearestValue(listEl, max){
+  if (!listEl) return 0;
+  const itemH = getItemHeight(listEl);
+  const v = Math.round(listEl.scrollTop / itemH);
+  return Math.max(0, Math.min(max, v));
+}
+
+function snapWheel(listEl, max){
+  if (!listEl) return;
+  const v = getNearestValue(listEl, max);
+  scrollToValue(listEl, v, "smooth");
+}
+
+function readTimerFromWheels(){
+  const h = getNearestValue(wheelH, 23);
+  const m = getNearestValue(wheelM, 59);
+  const s = getNearestValue(wheelS, 59);
+  return h*3600 + m*60 + s;
+}
+
+function disconnectChain(){
+  try{ fileSource?.stop(); }catch{}
+  try{ fileSource?.disconnect(); }catch{}
+  fileSource = null;
+
+  try{ noiseNode?.disconnect(); }catch{}
+}
+
+async function ensureAudio(){
+  if (ctx && masterGain && noiseNode) return;
+
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+  masterGain = ctx.createGain();
+  masterGain.gain.value = 0.0;
+  masterGain.connect(ctx.destination);
+
+  await ctx.audioWorklet.addModule("noise-worklet.js");
+  noiseNode = new AudioWorkletNode(ctx, "noise-processor", {
+    numberOfInputs: 0,
+    numberOfOutputs: 1,
+    outputChannelCount: [2],
+  });
+}
+
+function applyVolume(){
+  if (!masterGain || !ctx) return;
+  const v = volToGain(Number(volume.value));
+  const t = ctx.currentTime;
+  try{
+    masterGain.gain.cancelScheduledValues(t);
+    masterGain.gain.setTargetAtTime(v, t, 0.03);
+  }catch{}
+}
+
+function fadeIn(){
+  if (!masterGain || !ctx) return;
+  const v = volToGain(Number(volume.value));
+  const t = ctx.currentTime;
+  try{
+    masterGain.gain.cancelScheduledValues(t);
+    masterGain.gain.setValueAtTime(0.0, t);
+    masterGain.gain.linearRampToValueAtTime(v, t + 0.08);
+  }catch{}
+}
+
+function fadeOut(){
+  if (!masterGain || !ctx) return;
+  const t = ctx.currentTime;
+  try{
+    masterGain.gain.cancelScheduledValues(t);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, t);
+    masterGain.gain.linearRampToValueAtTime(0.0, t + 0.08);
+  }catch{}
+}
+
+function mapModeToNoiseType(mode){
+  switch(mode){
+    case "white": return 0;
+    case "pink": return 1;
+    case "brown": return 2;
+    case "fan": return 3;
+    case "waterfall": return 4;
+    case "rain": return 5;
+    case "wind": return 6;
+    case "vacuum": return 7;
+    default: return 0;
+  }
+}
+
+async function ensureRealWaterfallBuffer(){
+  if (realWaterfallBuffer) return realWaterfallBuffer;
+  if (!ctx) await ensureAudio();
+
+  if (!realWaterfallBufferPromise){
+    realWaterfallBufferPromise = fetch("waterfall-real.mp3")
+      .then((r) => {
+        if (!r.ok) throw new Error("Nelze načíst waterfall-real.mp3");
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => (realWaterfallBuffer = buf))
+      .catch((err) => {
+        console.error(err);
+        realWaterfallBufferPromise = null;
+        return null;
+      });
+  }
+  return realWaterfallBufferPromise;
+}
+
+async function ensureRealSeaBuffer(){
+  if (realSeaBuffer) return realSeaBuffer;
+  if (!ctx) await ensureAudio();
+
+  if (!realSeaBufferPromise){
+    realSeaBufferPromise = fetch("sea-real.mp3")
+      .then((r) => {
+        if (!r.ok) throw new Error("Nelze načíst sea-real.mp3");
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => (realSeaBuffer = buf))
+      .catch((err) => {
+        console.error(err);
+        realSeaBufferPromise = null;
+        return null;
+      });
+  }
+  return realSeaBufferPromise;
+}
+
+async function ensureRealWindBuffer(){
+  if (realWindBuffer) return realWindBuffer;
+  if (!ctx) await ensureAudio();
+
+  if (!realWindBufferPromise){
+    realWindBufferPromise = fetch("wind-real.mp3")
+      .then((r) => {
+        if (!r.ok) throw new Error("Nelze načíst wind-real.mp3");
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => (realWindBuffer = buf))
+      .catch((err) => {
+        console.error(err);
+        realWindBufferPromise = null;
+        return null;
+      });
+  }
+  return realWindBufferPromise;
+}
+
+async function ensureRealRainBuffer(){
+  if (realRainBuffer) return realRainBuffer;
+  if (!ctx) await ensureAudio();
+
+  if (!realRainBufferPromise){
+    realRainBufferPromise = fetch("rain-real.mp3")
+      .then((r) => {
+        if (!r.ok) throw new Error("Nelze načíst rain-real.mp3");
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => (realRainBuffer = buf))
+      .catch((err) => {
+        console.error(err);
+        realRainBufferPromise = null;
+        return null;
+      });
+  }
+  return realRainBufferPromise;
+}
+
+function buildChainFor(mode){
+  if (!ctx || !noiseNode || !masterGain) return;
+
+  disconnectChain();
+
+  // === REAL MP3 (seamless loop) ===
+  if (mode === "waterfall_real"){
+    if (!realWaterfallBuffer){
+      setStatus("Nacitam vodopady...");
+      return;
+    }
+    fileSource = ctx.createBufferSource();
+    fileSource.buffer = realWaterfallBuffer;
+
+    const _offset = configureSeamlessRealLoop(fileSource, fileSource.buffer);
+    fileSource.connect(masterGain);
+
+    try{ fileSource.start(0, _offset); }catch{}
+    return;
   }
 
-  // Initialize
-  setPlayers(4);
-  updateCornerAvgs();
-  showScreen('players');
-})();
+  if (mode === "sea_real"){
+    if (!realSeaBuffer){
+      setStatus("Nacitam more...");
+      return;
+    }
+    fileSource = ctx.createBufferSource();
+    fileSource.buffer = realSeaBuffer;
+
+    const _offset = configureSeamlessRealLoop(fileSource, fileSource.buffer);
+    fileSource.connect(masterGain);
+
+    try{ fileSource.start(0, _offset); }catch{}
+    return;
+  }
+
+  if (mode === "wind_real"){
+    if (!realWindBuffer){
+      setStatus("Nacitam vitr...");
+      return;
+    }
+    fileSource = ctx.createBufferSource();
+    fileSource.buffer = realWindBuffer;
+
+    const _offset = configureSeamlessRealLoop(fileSource, fileSource.buffer);
+    fileSource.connect(masterGain);
+
+    try{ fileSource.start(0, _offset); }catch{}
+    return;
+  }
+
+  if (mode === "rain_real"){
+    if (!realRainBuffer){
+      setStatus("Nacitam dest...");
+      return;
+    }
+    fileSource = ctx.createBufferSource();
+    fileSource.buffer = realRainBuffer;
+
+    const _offset = configureSeamlessRealLoop(fileSource, fileSource.buffer);
+    fileSource.connect(masterGain);
+
+    try{ fileSource.start(0, _offset); }catch{}
+    return;
+  }
+
+  // === Syntetické šumy (AudioWorklet) ===
+  const shape = intensity01();
+  const baseLevel = 0.18 + 0.35 * shape;
+
+  noiseNode.parameters.get("type").setValueAtTime(mapModeToNoiseType(mode), ctx.currentTime);
+  noiseNode.parameters.get("level").setValueAtTime(baseLevel, ctx.currentTime);
+
+  noiseNode.connect(masterGain);
+}
+
+async function rebuildIfPlaying(){
+  if (!isPlaying) return;
+
+  if (currentSound === "waterfall_real" && !realWaterfallBuffer) await ensureRealWaterfallBuffer();
+  if (currentSound === "sea_real" && !realSeaBuffer) await ensureRealSeaBuffer();
+  if (currentSound === "wind_real" && !realWindBuffer) await ensureRealWindBuffer();
+  if (currentSound === "rain_real" && !realRainBuffer) await ensureRealRainBuffer();
+
+  buildChainFor(currentSound);
+  applyVolume();
+}
+
+async function start(){
+  await ensureAudio();
+
+  if (currentSound === "waterfall_real") await ensureRealWaterfallBuffer();
+  if (currentSound === "sea_real") await ensureRealSeaBuffer();
+  if (currentSound === "wind_real") await ensureRealWindBuffer();
+  if (currentSound === "rain_real") await ensureRealRainBuffer();
+
+  buildChainFor(currentSound);
+
+  if (ctx.state === "suspended"){
+    await ctx.resume();
+  }
+
+  fadeIn();
+  isPlaying = true;
+  updateToggleUI();
+
+  if (timerEnabled && timerSeconds>0){
+    timerEndAt = Date.now() + timerSeconds*1000;
+    startTimerTick();
+    updateTimerDisplay();
+  }
+
+  setStatus(labelFor(currentSound));
+}
+
+async function stopHard(){
+  fadeOut();
+  setTimeout(() => {
+    disconnectChain();
+  }, 120);
+
+  isPlaying = false;
+  updateToggleUI();
+}
+
+function wireUI(){
+  updateSoundBtnLabel();
+  updateToggleUI();
+  applyVolume();
+  setStatus("Připraveno.");
+
+  volume?.addEventListener("input", () => applyVolume());
+  intensity?.addEventListener("input", () => rebuildIfPlaying());
+
+  soundBtn?.addEventListener("click", () => openSoundModal());
+  soundClose?.addEventListener("click", () => closeSoundModal());
+  soundModal?.addEventListener("click", (e) => {
+    if (e.target === soundModal) closeSoundModal();
+
+    const b = e.target.closest("[data-sound]");
+    if (!b) return;
+
+    currentSound = b.dataset.sound;
+    localStorage.setItem("sumySound", currentSound);
+
+    updateSoundBtnLabel();
+    setStatus(labelFor(currentSound));
+    closeSoundModal();
+    rebuildIfPlaying();
+  });
+
+  toggleBtn?.addEventListener("click", async () => {
+    try{
+      if (!isPlaying) await start();
+      else await stopHard();
+    }catch(err){
+      console.error(err);
+      setStatus("Nepodařilo se spustit audio (zkus kliknout znovu).");
+    }
+  });
+
+  // Timer UI
+  buildWheel(wheelH, 23);
+  buildWheel(wheelM, 59);
+  buildWheel(wheelS, 59);
+
+  scrollToValue(wheelH, 1);
+  scrollToValue(wheelM, 30);
+  scrollToValue(wheelS, 0);
+
+  const snapLater = (listEl, max) => {
+    let t = null;
+    listEl.addEventListener("scroll", () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => snapWheel(listEl, max), 80);
+    }, { passive:true });
+  };
+  snapLater(wheelH, 23);
+  snapLater(wheelM, 59);
+  snapLater(wheelS, 59);
+
+  timerDisplay?.addEventListener("click", () => openTimerModal());
+  timerCancel?.addEventListener("click", () => closeTimerModal());
+  timerOk?.addEventListener("click", () => {
+    const sec = readTimerFromWheels();
+    timerSeconds = sec;
+    timerEnabled = sec>0;
+    if (timerEnabled){
+      timerEndAt = Date.now() + timerSeconds*1000;
+      startTimerTick();
+    } else {
+      stopTimerTick();
+      timerEndAt = 0;
+    }
+    updateTimerDisplay();
+    closeTimerModal();
+  });
+
+  timerToggle?.addEventListener("click", () => {
+    timerEnabled = !timerEnabled;
+    timerToggle.setAttribute("aria-pressed", timerEnabled ? "true" : "false");
+    timerToggle.textContent = timerEnabled ? "Zapnuto" : "Zapnout";
+
+    if (timerEnabled){
+      timerSeconds = readTimerFromWheels();
+      if (timerSeconds > 0){
+        timerEndAt = Date.now() + timerSeconds*1000;
+        startTimerTick();
+      }
+    } else {
+      stopTimerTick();
+      timerEndAt = 0;
+    }
+    updateTimerDisplay();
+  });
+
+  updateTimerDisplay();
+
+  // NEZASTAVOVAT na visibilitychange (kvůli přehrávání na pozadí)
+  document.addEventListener("visibilitychange", () => {
+    // nic
+  });
+}
+
+wireUI();
