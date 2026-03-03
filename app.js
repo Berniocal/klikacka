@@ -1,9 +1,12 @@
-/* Reakční doba – v3.2
-   Opravy:
-   - zachovaná kompletní herní logika z v3 (Start pro 1. kolo, Next spouští další kola hned)
-   - opravené chování Android tlačítka Zpět:
-       Game -> confirm -> Rules -> Topic -> Players -> (exit app)
-     Na Players je "root" (bez history state), takže další zpět ukončí aplikaci.
+/* Reakční doba – v3.3
+   Změny:
+   - Start po kliknutí zmizí (pro zbytek hry už není potřeba).
+   - Režim "Podle času" = soutěž na nejnižší PRŮMĚRNÝ čas:
+       * nepřidělují se žádné body (všichni 0)
+       * celkové pořadí po 10 kolech se řadí podle průměru (nejnižší vyhrává)
+   - Režim "Klasické" (1 bod jen nejrychlejší):
+       * pozadí se zbarví do barvy vítěze okamžitě při jeho správném stisku (nečeká se na ostatní)
+   - Tlačítko hráče při dotyku zesvětlá, ale čas se počítá od prvního dotyku.
 */
 (() => {
   'use strict';
@@ -36,7 +39,6 @@
   }
 
   function goToPlayersRoot(){
-    // Replace current state with "no-state" root so Back exits app
     history.replaceState(null, '', location.pathname);
     showScreen('players');
   }
@@ -51,7 +53,6 @@
       showScreen('game');
       return false;
     }
-    // stop timers etc., but don't navigate here (popstate will)
     resetAll(false);
     return true;
   }
@@ -59,7 +60,6 @@
   window.addEventListener('popstate', (ev) => {
     const target = ev.state?.screen;
     if (!target){
-      // root
       showScreen('players');
       return;
     }
@@ -240,6 +240,9 @@
     rt: [null,null,null,null],
     stageTimer: null,
     lastStageShape: null,
+
+    // visual
+    winnerTintSet: false,
   };
 
   function setPlayers(n){
@@ -256,7 +259,7 @@
   function scoringName(){
     return state.scoring === 'classic' ? 'Klasické'
          : state.scoring === '3210' ? '3–2–1–0'
-         : 'Podle času';
+         : 'Podle času (průměr)';
   }
 
   function metricMode(){
@@ -302,6 +305,7 @@
     state.disq = [false,false,false,false];
     state.rt = [null,null,null,null];
     state.lastStageShape = null;
+    state.winnerTintSet = false;
 
     if (state.stageTimer) clearTimeout(state.stageTimer);
     state.stageTimer = null;
@@ -317,6 +321,7 @@
     // re-enable corner taps
     cornerBtns.forEach((b, idx) => {
       if (idx < state.players) b.style.pointerEvents = 'auto';
+      b.classList.remove('pressed');
     });
 
     clearWinnerTint();
@@ -336,16 +341,20 @@
     cornerBtns.forEach((b, idx) => {
       if (idx >= state.players) return;
       b.style.pointerEvents = lock ? 'none' : 'auto';
+      if (lock) b.classList.remove('pressed');
     });
   }
 
   // --- Round start logic ---
   function startRoundWithCountdown(){
     if (state.running) return;
+
     clearRoundState();
     state.running = true;
 
+    // Start is needed only for the first round – hide immediately after press
     btnStart.disabled = true;
+    btnStart.classList.add('hidden');
 
     // choose target
     state.targetShape = pick(SHAPES).key;
@@ -464,6 +473,12 @@
     const now = performance.now();
     const rt = Math.max(0, now - state.targetStartTs);
     state.rt[playerIdx] = rt;
+
+    // Classic: tint immediately on FIRST correct valid tap
+    if (state.scoring === 'classic' && !state.winnerTintSet){
+      state.winnerTintSet = true;
+      setWinnerTint(playerIdx);
+    }
   }
 
   function computeRanking(){
@@ -504,6 +519,11 @@
   }
 
   function awardPoints(ranking){
+    // TIME mode: no points at all
+    if (state.scoring === 'time'){
+      return;
+    }
+
     const valids = ranking.filter(e => !e.disq && e.rt !== null);
 
     if (state.scoring === 'classic'){
@@ -512,14 +532,6 @@
       const pts = [3,2,1,0];
       for (let i=0;i<valids.length;i++){
         valids[i].pointsAdd = pts[i] ?? 0;
-      }
-    } else if (state.scoring === 'time'){
-      if (valids.length > 0){
-        const tFast = valids[0].rt;
-        for (const e of valids){
-          const raw = 10 * (tFast / e.rt);
-          e.pointsAdd = Math.max(0, Math.round(raw));
-        }
       }
     }
 
@@ -538,29 +550,19 @@
   }
 
   function showResultsAndScore(isFinal){
-    // scoring + averages
     const ranking = computeRanking();
     awardPoints(ranking);
     updateAveragesFromRound();
-
-    // Winner tint only for classic mode (first gets a point)
-    if (!isFinal && state.scoring === 'classic'){
-      const winner = ranking.find(e => !e.disq && e.rt !== null);
-      if (winner) setWinnerTint(winner.idx);
-    }
-
     updateCornerMetrics();
 
-    // render header
     resultsTitle.textContent = isFinal ? 'Konec hry – celkové pořadí' : 'Výsledky kola';
     resultsSub.textContent = isFinal
-      ? `Bodování: ${scoringName()}`
-      : `Kolo ${state.round}/${TOTAL_ROUNDS} • Bodování: ${scoringName()}`;
+      ? `Režim: ${scoringName()}`
+      : `Kolo ${state.round}/${TOTAL_ROUNDS} • Režim: ${scoringName()}`;
 
     resultsList.innerHTML = '';
 
     if (!isFinal){
-      // per-round list
       ranking.forEach((e, i) => {
         const row = document.createElement('div');
         row.className = 'result-row';
@@ -584,7 +586,7 @@
 
         const pts = document.createElement('div');
         pts.className = 'points';
-        pts.textContent = `+${e.pointsAdd || 0}`;
+        pts.textContent = (state.scoring === 'time') ? '' : `+${e.pointsAdd || 0}`;
 
         row.appendChild(badge);
         row.appendChild(mid);
@@ -595,7 +597,9 @@
 
       btnNext.textContent = (state.round >= TOTAL_ROUNDS) ? 'Zobrazit celkové pořadí →' : 'Next →';
     } else {
-      // final ranking by points desc, avg asc
+      // Final ordering:
+      // - time: lowest average wins
+      // - else: points desc, avg asc
       const finalEntries = [];
       for (let i=0;i<state.players;i++){
         const avg = state.rtCount[i] > 0 ? (state.rtSum[i]/state.rtCount[i]) : Infinity;
@@ -608,7 +612,12 @@
           avgText: state.rtCount[i] > 0 ? msText(avg) : '—',
         });
       }
-      finalEntries.sort((a,b) => (b.points - a.points) || (a.avg - b.avg) || (a.idx - b.idx));
+
+      if (state.scoring === 'time'){
+        finalEntries.sort((a,b) => (a.avg - b.avg) || (a.idx - b.idx));
+      } else {
+        finalEntries.sort((a,b) => (b.points - a.points) || (a.avg - b.avg) || (a.idx - b.idx));
+      }
 
       finalEntries.forEach((e, i) => {
         const row = document.createElement('div');
@@ -626,14 +635,16 @@
 
         const sub = document.createElement('div');
         sub.className = 'small';
-        sub.textContent = `Body: ${e.points} • Průměr: ${e.avgText}`;
+        sub.textContent = (state.scoring === 'time')
+          ? `Průměr: ${e.avgText}`
+          : `Body: ${e.points} • Průměr: ${e.avgText}`;
 
         mid.appendChild(title);
         mid.appendChild(sub);
 
         const pts = document.createElement('div');
         pts.className = 'points';
-        pts.textContent = `${e.points} b`;
+        pts.textContent = (state.scoring === 'time') ? '' : `${e.points} b`;
 
         row.appendChild(badge);
         row.appendChild(mid);
@@ -647,20 +658,18 @@
 
     resultsEl.classList.remove('hidden');
     btnStart.classList.add('hidden');
-
     lockCorners(true);
   }
 
   function nextAction(){
+    // New round should start with normal background tint
     clearWinnerTint();
 
     if (state.round >= TOTAL_ROUNDS){
-      // show final ranking modal
       showResultsAndScore(true);
       return;
     }
 
-    // advance to next round and start immediately
     state.round += 1;
     resultsEl.classList.add('hidden');
     lockCorners(false);
@@ -674,8 +683,7 @@
   // --- Navigation wiring ---
   $$('#screen-players button[data-players]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const n = Number(btn.dataset.players);
-      setPlayers(n);
+      setPlayers(Number(btn.dataset.players));
       pushNav('topic');
     });
   });
@@ -688,7 +696,7 @@
     const checked = $('input[name="scoring"]:checked');
     setScoring(checked ? checked.value : 'classic');
 
-    // new session stats
+    // new session
     state.round = 1;
     state.points = [0,0,0,0];
     state.rtSum = [0,0,0,0];
@@ -697,48 +705,53 @@
     clearRoundState();
     updateCornerMetrics();
 
-    pushNav('game'); // Start button is visible here for first round
+    pushNav('game'); // Start button visible for first round
   });
 
-  // Scoring radios
-  $$('input[name="scoring"]').forEach(r => {
-    r.addEventListener('change', () => setScoring(r.value));
-  });
+  $$('input[name="scoring"]').forEach(r => r.addEventListener('change', () => setScoring(r.value)));
 
-  // Game controls
+  // Start only for first round
   btnStart.addEventListener('click', startRoundWithCountdown);
 
   btnNext.addEventListener('click', () => {
-    if (resultsTitle.textContent.includes('Konec hry')){
-      nextFromFinal();
-    } else {
-      nextAction();
-    }
+    if (resultsTitle.textContent.includes('Konec hry')) nextFromFinal();
+    else nextAction();
   });
 
   btnReset.addEventListener('click', () => resetAll(true));
 
-  // Corner taps
+  // Corner taps + press feedback
   cornerBtns.forEach((btn, idx) => {
-    const onTap = (ev) => {
+    const pressOn = (ev) => {
+      if (idx >= state.players) return;
+      btn.classList.add('pressed');
+      // record tap immediately on first touch
       ev.preventDefault();
       recordTap(idx);
     };
-    btn.addEventListener('pointerdown', onTap, { passive: false });
-    btn.addEventListener('click', onTap, { passive: false });
+    const pressOff = () => btn.classList.remove('pressed');
+
+    btn.addEventListener('pointerdown', pressOn, { passive: false });
+    btn.addEventListener('pointerup', pressOff, { passive: true });
+    btn.addEventListener('pointercancel', pressOff, { passive: true });
+    btn.addEventListener('pointerleave', pressOff, { passive: true });
+
+    // fallback click (desktop)
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      recordTap(idx);
+    }, { passive: false });
   });
 
   // Prevent double-tap zoom (mobile)
   let lastTouch = 0;
   document.addEventListener('touchend', (e) => {
     const now = Date.now();
-    if (now - lastTouch <= 300){
-      e.preventDefault();
-    }
+    if (now - lastTouch <= 300) e.preventDefault();
     lastTouch = now;
   }, { passive: false });
 
-  // Register service worker
+  // Register SW
   if ('serviceWorker' in navigator){
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('./sw.js').catch(() => {});

@@ -1,5 +1,5 @@
 /* Simple offline-first cache for Reakční doba PWA */
-const CACHE_NAME = 'reakcni-doba-v3-2';
+const const CACHE_NAME = 'reakcni-doba-v3-3';;
 const ASSETS = [
   './',
   './index.html',
