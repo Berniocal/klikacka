@@ -1,4 +1,4 @@
-/* Reakční doba – v2 (tvary) */
+/* Reakční doba – v3 (tvary) */
 :root{
   --bg: #0b1220;
   --card: rgba(255,255,255,.06);
@@ -115,6 +115,7 @@ code{ background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 10px; 
 
 /* Game */
 .game{
+  --winnerTint: rgba(0,0,0,0);
   position: relative;
   width: min(980px, 100%);
   height: min(720px, 86vh);
@@ -126,16 +127,23 @@ code{ background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 10px; 
   touch-action: manipulation;
 }
 
+.game.winner-tint{
+  background:
+    radial-gradient(900px 600px at 50% 40%, rgba(255,255,255,.05), transparent 60%),
+    linear-gradient(0deg, var(--winnerTint), var(--winnerTint)),
+    rgba(0,0,0,.15);
+}
+
 .corner{
   position: absolute;
-  width: 30%;
-  height: 30%;
+  width: 24%;
+  height: 24%;
   border: none;
   cursor: pointer;
   display: grid;
   align-content: start;
   gap: 4px;
-  padding: 12px;
+  padding: 10px;
   color: #0b1220;
   font-weight: 900;
   user-select: none;
@@ -152,7 +160,7 @@ code{ background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 10px; 
   letter-spacing: .9px;
 }
 .corner-metric{
-  font-size: 28px;
+  font-size: 26px;
   line-height: 1;
   text-shadow: 0 2px 0 rgba(255,255,255,.25);
 }
@@ -293,7 +301,7 @@ code{ background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 10px; 
 
 @media (max-width: 520px){
   .game{ height: 92vh; }
-  .corner{ width: 32%; height: 32%; }
-  .corner-metric{ font-size: 26px; }
+  .corner{ width: 26%; height: 26%; }
+  .corner-metric{ font-size: 24px; }
   .frame{ height: min(380px, 44vh); }
 }

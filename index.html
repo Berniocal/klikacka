@@ -50,23 +50,23 @@
     <section class="screen" id="screen-scoring">
       <button class="fs-btn" id="btn-fs3" title="Fullscreen">⛶</button>
       <div class="card">
-        <h2>Bodování</h2>
-        <p class="muted">Vyberte způsob přidělování bodů (platí jen pro správné reakce).</p>
+        <h2>Pravidla</h2>
+        <p class="muted">Vyberte bodování.</p>
 
         <div class="stack">
           <label class="radio">
             <input type="radio" name="scoring" value="classic" checked>
-            <span><b>Klasické</b> – první má 1 bod, ostatní 0.</span>
+            <span><b>Klasické</b> – první má 1 bod, ostatní 0. (Rohy ukazují body.)</span>
           </label>
 
           <label class="radio">
             <input type="radio" name="scoring" value="3210">
-            <span><b>3–2–1–0</b> – 1. má 3, 2. má 2, 3. má 1, 4. má 0.</span>
+            <span><b>3–2–1–0</b> – 1. má 3, 2. má 2, 3. má 1, 4. má 0. (Rohy ukazují body.)</span>
           </label>
 
           <label class="radio">
             <input type="radio" name="scoring" value="time">
-            <span><b>Podle času</b> – nejrychlejší má 10 bodů, ostatní dostanou přibližně <code>10 · (t₁ / t)</code>.</span>
+            <span><b>Podle času</b> – nejrychlejší má 10 bodů, ostatní dostanou přibližně <code>10 · (t₁ / t)</code>. (Rohy ukazují průměrný čas.)</span>
           </label>
         </div>
 
@@ -79,26 +79,26 @@
 
     <!-- Screen: game -->
     <section class="screen" id="screen-game">
-      <div class="game">
+      <div class="game" id="game-root">
         <!-- Corner buttons -->
         <button class="corner c-blue" id="p1" aria-label="Hráč 1">
           <div class="corner-name">Modrý</div>
-          <div class="corner-metric" id="avg1">—</div>
+          <div class="corner-metric" id="metric1">0 b</div>
         </button>
 
         <button class="corner c-green" id="p2" aria-label="Hráč 2">
           <div class="corner-name">Zelený</div>
-          <div class="corner-metric" id="avg2">—</div>
+          <div class="corner-metric" id="metric2">0 b</div>
         </button>
 
         <button class="corner c-red" id="p3" aria-label="Hráč 3">
           <div class="corner-name">Červený</div>
-          <div class="corner-metric" id="avg3">—</div>
+          <div class="corner-metric" id="metric3">0 b</div>
         </button>
 
         <button class="corner c-yellow" id="p4" aria-label="Hráč 4">
           <div class="corner-name">Žlutý</div>
-          <div class="corner-metric" id="avg4">—</div>
+          <div class="corner-metric" id="metric4">0 b</div>
         </button>
 
         <!-- Center -->
