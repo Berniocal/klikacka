@@ -1,135 +1,172 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="cs">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#111827" />
-  <title>Reakční doba – Tvary</title>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/icon-192.png">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="styles.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Reakční doba</title>
+
+<link rel="stylesheet" href="styles.css">
+<link rel="manifest" href="manifest.webmanifest">
+
 </head>
+
 <body>
-  <div id="app" class="app" aria-live="polite">
-    <!-- Screen: players -->
-    <section class="screen active" id="screen-players">
-      <button class="fs-btn" id="btn-fs" title="Fullscreen">⛶</button>
-      <div class="card">
-        <h1>Reakční doba</h1>
-        <p class="muted">Vyberte počet hráčů.</p>
-        <div class="grid4">
-          <button class="big" data-players="1">1 hráč</button>
-          <button class="big" data-players="2">2 hráči</button>
-          <button class="big" data-players="3">3 hráči</button>
-          <button class="big" data-players="4">4 hráči</button>
-        </div>
-      </div>
-    </section>
 
-    <!-- Screen: topic -->
-    <section class="screen" id="screen-topic">
-      <button class="fs-btn" id="btn-fs2" title="Fullscreen">⛶</button>
-      <div class="card">
-        <h2>Téma</h2>
-        <p class="muted">První verze: pouze <b>tvary</b> (kruh, čtverec, obdélník, trojúhelník).</p>
-        <div class="grid2">
-          <button class="big primary" id="topic-shapes">Tvary</button>
-          <button class="big" disabled>Barvy (brzy)</button>
-          <button class="big" disabled>Emoji (brzy)</button>
-          <button class="big" disabled>Slova (brzy)</button>
-          <button class="big" disabled>Vlastní (brzy)</button>
-        </div>
-        <div class="row">
-          <button class="ghost" id="back-to-players">← Zpět</button>
-        </div>
-      </div>
-    </section>
+<div class="app">
 
-    <!-- Screen: scoring -->
-    <section class="screen" id="screen-scoring">
-      <button class="fs-btn" id="btn-fs3" title="Fullscreen">⛶</button>
-      <div class="card">
-        <h2>Pravidla</h2>
-        <p class="muted">Vyberte bodování.</p>
+<!-- SCREEN PLAYERS -->
 
-        <div class="stack">
-          <label class="radio">
-            <input type="radio" name="scoring" value="classic" checked>
-            <span><b>Klasické</b> – první má 1 bod, ostatní 0. (Rohy ukazují body.)</span>
-          </label>
+<div id="screen-players" class="screen active">
+<div class="card">
 
-          <label class="radio">
-            <input type="radio" name="scoring" value="3210">
-            <span><b>3–2–1–0</b> – 1. má 3, 2. má 2, 3. má 1, 4. má 0. (Rohy ukazují body.)</span>
-          </label>
+<h1>Reakční hra</h1>
+<p class="muted">Kolik bude hráčů?</p>
 
-          <label class="radio">
-            <input type="radio" name="scoring" value="time">
-            <span><b>Podle času</b> – nejrychlejší má 10 bodů, ostatní dostanou přibližně <code>10 · (t₁ / t)</code>. (Rohy ukazují průměrný čas.)</span>
-          </label>
-        </div>
+<div class="grid4">
+<button class="big" data-players="2">2 hráči</button>
+<button class="big" data-players="3">3 hráči</button>
+<button class="big" data-players="4">4 hráči</button>
+</div>
 
-        <div class="row space">
-          <button class="ghost" id="back-to-topic">← Zpět</button>
-          <button class="big primary" id="go-to-game">Začít hru</button>
-        </div>
-      </div>
-    </section>
+</div>
+</div>
 
-    <!-- Screen: game -->
-    <section class="screen" id="screen-game">
-      <div class="game" id="game-root">
-        <!-- Corner buttons -->
-        <button class="corner c-blue" id="p1" aria-label="Hráč 1">
-          <div class="corner-name">Modrý</div>
-          <div class="corner-metric" id="metric1">0 b</div>
-        </button>
+<!-- SCREEN TOPIC -->
 
-        <button class="corner c-green" id="p2" aria-label="Hráč 2">
-          <div class="corner-name">Zelený</div>
-          <div class="corner-metric" id="metric2">0 b</div>
-        </button>
+<div id="screen-topic" class="screen">
 
-        <button class="corner c-red" id="p3" aria-label="Hráč 3">
-          <div class="corner-name">Červený</div>
-          <div class="corner-metric" id="metric3">0 b</div>
-        </button>
+<div class="card">
 
-        <button class="corner c-yellow" id="p4" aria-label="Hráč 4">
-          <div class="corner-name">Žlutý</div>
-          <div class="corner-metric" id="metric4">0 b</div>
-        </button>
+<h2>Vyber téma</h2>
 
-        <!-- Center -->
-        <div class="center">
-          <div class="frame" id="frame" aria-label="Tvar">
-            <div id="frame-shape" class="shape hidden" aria-hidden="true"></div>
-          </div>
+<div class="stack">
 
-          <button class="start" id="btn-start">Start</button>
-          <div class="countdown hidden" id="countdown">3</div>
+<button id="topic-shapes" class="big">Tvary</button>
 
-          <!-- Results modal -->
-          <div class="results hidden" id="results" role="dialog" aria-modal="true">
-            <div class="results-top">
-              <div class="results-title" id="results-title">Výsledky kola</div>
-              <div class="results-sub" id="results-sub">Kolo 1/10 • Bodování: Klasické</div>
-              <button class="pill-btn" id="btn-reset" title="Zpět na začátek">Reset</button>
-            </div>
+<button id="topic-colors" class="big">
+Barvy
+</button>
 
-            <div class="results-list" id="results-list"></div>
+<button id="topic-emoji" class="big">
+Emoji
+</button>
 
-            <div class="row space">
-              <button class="big primary" id="btn-next">Next →</button>
-            </div>
-          </div>
+<button id="topic-words" class="big">
+Slova
+</button>
 
-        </div>
-      </div>
-    </section>
-  </div>
+<button id="topic-images" class="big">
+Vlastní obrázky
+</button>
 
-  <script src="app.js"></script>
+</div>
+
+<button id="back-to-players" class="ghost">
+Zpět
+</button>
+
+</div>
+
+</div>
+
+<!-- SCREEN SCORING -->
+
+<div id="screen-scoring" class="screen">
+
+<div class="card">
+
+<h2>Bodování</h2>
+
+<div class="stack">
+
+<label class="radio">
+<input type="radio" name="scoring" value="classic" checked>
+<div>
+<b>Klasické</b>
+<br>
+1 bod pro nejrychlejšího
+</div>
+</label>
+
+<label class="radio">
+<input type="radio" name="scoring" value="3210">
+<div>
+<b>3-2-1-0</b>
+<br>
+1.–4. místo
+</div>
+</label>
+
+<label class="radio">
+<input type="radio" name="scoring" value="time">
+<div>
+<b>Podle času</b>
+<br>
+Vyhrává nejlepší průměr
+</div>
+</label>
+
+</div>
+
+<div class="row space">
+<button id="back-to-topic" class="ghost">Zpět</button>
+<button id="go-to-game" class="big primary">Start</button>
+</div>
+
+</div>
+
+</div>
+
+<!-- GAME -->
+
+<div id="screen-game" class="screen">
+
+<div class="game">
+
+<button class="corner c-blue">
+<div class="corner-name">Hráč 1</div>
+<div class="corner-metric">0</div>
+</button>
+
+<button class="corner c-green">
+<div class="corner-name">Hráč 2</div>
+<div class="corner-metric">0</div>
+</button>
+
+<button class="corner c-red">
+<div class="corner-name">Hráč 3</div>
+<div class="corner-metric">0</div>
+</button>
+
+<button class="corner c-yellow">
+<div class="corner-name">Hráč 4</div>
+<div class="corner-metric">0</div>
+</button>
+
+<div class="center">
+
+<div class="frame">
+<div id="frame-shape"></div>
+</div>
+
+</div>
+
+<button id="btn-start" class="start">
+Start
+</button>
+
+<div id="countdown" class="countdown hidden">
+3
+</div>
+
+</div>
+
+</div>
+
+</div>
+
+<script src="app.js"></script>
+
 </body>
 </html>
